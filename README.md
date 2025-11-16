@@ -130,6 +130,9 @@ nano .env  # Edit with your credentials
 ### Configuration File (`.env`)
 
 ```env
+# Dashboard Authentication
+DASHBOARD_PASSWORD=your_strong_password_here
+
 # Portainer Connection
 PORTAINER_HOST=notmyproblemnas
 PORTAINER_PORT=9000
@@ -157,6 +160,21 @@ streamlit run app/main.py
 ```
 
 Opens at: http://localhost:8501
+
+### Authentication
+
+The dashboard is protected with a password for security. On first access, you'll see a login screen:
+
+1. Enter the password you set in `.env` as `DASHBOARD_PASSWORD`
+2. Click **Login**
+3. You'll have 5 attempts before the app locks (restart required)
+4. Click **Logout from Dashboard** in the sidebar to sign out
+
+**Security Features:**
+- Password protection for dashboard access
+- Auto-login using environment variables for Portainer and Synology (backend services)
+- Failed attempt tracking (max 5 attempts)
+- Session-based authentication
 
 ### Features
 
@@ -325,6 +343,9 @@ python scripts/inventory.py sync
 All configuration in single **`.env`** file at project root:
 
 ```env
+# Dashboard Authentication
+DASHBOARD_PASSWORD=your_strong_password  # Required for dashboard access
+
 # Portainer Connection
 PORTAINER_HOST=notmyproblemnas      # Hostname or IP
 PORTAINER_PORT=9000                  # Default: 9000
@@ -593,6 +614,8 @@ git push -u origin main
 Click "Advanced mode" and paste:
 
 ```env
+DASHBOARD_PASSWORD=your_strong_password
+
 PORTAINER_HOST=notmyproblemnas
 PORTAINER_PORT=9000
 PORTAINER_USERNAME=admin

@@ -68,11 +68,72 @@ def init_session_state():
         st.session_state.authenticated = False
     if 'portainer_connected' not in st.session_state:
         st.session_state.portainer_connected = False
+    if 'dashboard_authenticated' not in st.session_state:
+        st.session_state.dashboard_authenticated = False
+    if 'login_attempts' not in st.session_state:
+        st.session_state.login_attempts = 0
+
+
+def dashboard_login():
+    """Dashboard login screen with password protection"""
+    # Center the login form
+    col1, col2, col3 = st.columns([1, 2, 1])
+
+    with col2:
+        st.markdown('<p class="main-header">🔐 Dashboard Login</p>', unsafe_allow_html=True)
+        st.markdown("---")
+
+        # Check if dashboard password is configured
+        dashboard_password = os.getenv("DASHBOARD_PASSWORD", "")
+
+        if not dashboard_password:
+            st.error("⚠️ Dashboard password not configured in .env file")
+            st.info("Please set DASHBOARD_PASSWORD in your .env file to enable authentication")
+            st.code("DASHBOARD_PASSWORD=your-strong-password", language="bash")
+            st.stop()
+
+        # Login form
+        with st.form("login_form"):
+            st.subheader("Enter Dashboard Password")
+            password = st.text_input("Password", type="password", placeholder="Enter your password")
+            submit = st.form_submit_button("Login", use_container_width=True, type="primary")
+
+            if submit:
+                if password == dashboard_password:
+                    st.session_state.dashboard_authenticated = True
+                    st.session_state.login_attempts = 0
+                    st.success("Login successful!")
+                    st.rerun()
+                else:
+                    st.session_state.login_attempts += 1
+                    remaining = 5 - st.session_state.login_attempts
+
+                    if st.session_state.login_attempts >= 5:
+                        st.error("Too many failed attempts. Please restart the application.")
+                        st.stop()
+                    else:
+                        st.error(f"Incorrect password. {remaining} attempts remaining.")
+
+        # Security info
+        st.markdown("---")
+        st.caption("Secure access to Synology Infrastructure Manager")
+        st.caption(f"Login attempts: {st.session_state.login_attempts}/5")
 
 
 def sidebar_config():
     """Sidebar configuration and authentication"""
     st.sidebar.title("⚙️ Configuration")
+
+    # Dashboard logout button
+    if st.sidebar.button("🚪 Logout from Dashboard", width="stretch", type="secondary"):
+        st.session_state.dashboard_authenticated = False
+        st.session_state.authenticated = False
+        st.session_state.portainer_connected = False
+        st.session_state.inventory = None
+        st.session_state.proxy_manager = None
+        st.rerun()
+
+    st.sidebar.divider()
 
     # Auto-connect to Portainer if credentials are available
     if not st.session_state.portainer_connected and 'portainer_auto_connect_attempted' not in st.session_state:
@@ -695,6 +756,11 @@ def sync_tab():
 def main():
     """Main application"""
     init_session_state()
+
+    # Check dashboard authentication first
+    if not st.session_state.dashboard_authenticated:
+        dashboard_login()
+        return
 
     # Header
     st.markdown('<p class="main-header">🖥️ Synology Infrastructure Manager</p>', unsafe_allow_html=True)
