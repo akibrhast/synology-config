@@ -8,7 +8,7 @@ services:
     image: synology-infrastructure-manager:latest
     container_name: synology-infrastructure-manager
     ports:
-      - "8501:8501"
+      - "8502:8501"
     environment:
       # Portainer Connection
       PORTAINER_HOST: "${PORTAINER_HOST:-example}"
