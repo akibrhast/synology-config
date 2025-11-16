@@ -20,6 +20,7 @@ services:
       SYNOLOGY_PORT: "${SYNOLOGY_PORT:-5000}"
       SYNOLOGY_USERNAME: "${SYNOLOGY_USERNAME:-example}"
       SYNOLOGY_PASSWORD: "${SYNOLOGY_PASSWORD}"
+      DASHBOARD_PASSWORD: "${DASHBOARD_PASSWORD}"
     restart: unless-stopped
     networks:
       - synology-net
