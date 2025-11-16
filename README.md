@@ -38,7 +38,7 @@ cp .env.example .env
 # 2. Deploy with Docker Compose
 docker-compose up -d
 
-# 3. Access at http://localhost:8501
+# 3. Access at http://localhost:8502
 ```
 
 ### Option 2: Local Development
@@ -159,7 +159,9 @@ source .venv/bin/activate
 streamlit run app/main.py
 ```
 
-Opens at: http://localhost:8501
+Opens at:
+- **Local/Development**: http://localhost:8501
+- **Docker Deployment**: http://localhost:8502
 
 ### Authentication
 
@@ -635,21 +637,21 @@ SYNOLOGY_PASSWORD=your_synology_password
 
 #### Step 5: Access the App
 
-- **Direct access**: `http://<nas-ip>:8501`
+- **Direct access**: `http://<nas-ip>:8502` (Docker uses port 8502)
 - **After creating reverse proxy**: `https://synology-manager.akibrhast.synology.me`
 
 #### Step 6: Create Reverse Proxy Rule (Optional)
 
 Use the app itself to create its own reverse proxy:
 
-1. Access `http://<nas-ip>:8501`
+1. Access `http://<nas-ip>:8502` (Docker deployment port)
 2. Go to **Reverse Proxy** tab → **Add New Rule**
 3. Fill in:
    - Service Name: `synology-manager`
    - Frontend Domain: `synology-manager.akibrhast.synology.me`
    - Frontend Port: `443`
    - Backend Host: `notmyproblemnas`
-   - Backend Port: `8501`
+   - Backend Port: `8502` (Docker host port)
    - Enable HSTS: ✅
    - **Enable WebSocket: ✅** (required for Streamlit)
 4. Click **Create Rule**
@@ -670,7 +672,7 @@ docker logs synology-infrastructure-manager
 
 # Common issues:
 # - Missing environment variables
-# - Port 8501 already in use
+# - Port 8502 already in use on host
 # - Network conflicts
 ```
 

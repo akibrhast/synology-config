@@ -408,11 +408,16 @@ def proxy_tab():
 
 def show_current_rules(manager):
     """Display current reverse proxy rules"""
+    # Initialize session state for selected rules
+    if 'selected_rule_ids' not in st.session_state:
+        st.session_state.selected_rule_ids = []
+
     col1, col2 = st.columns([4, 1])
 
     with col2:
         if st.button("🔄 Refresh", width="stretch"):
             manager.list_rules(refresh=True)
+            st.session_state.selected_rule_ids = []  # Clear selection on refresh
             st.rerun()
 
     rules = manager.list_rules(refresh=False)
@@ -423,22 +428,33 @@ def show_current_rules(manager):
 
     st.subheader(f"Found {len(rules)} Rules")
 
+    # Debug: Show first rule structure
+    if rules:
+        with st.expander("🔍 Debug: API Response Structure", expanded=False):
+            st.json(rules[0])
+            st.caption("Available keys in first rule:")
+            st.code(str(list(rules[0].keys())))
+
     # Convert to DataFrame
     rules_data = []
-    for rule in rules:
+    for idx, rule in enumerate(rules):
         frontend = rule.get('frontend', {})
         backend = rule.get('backend', {})
         has_ws = len(rule.get('customize_headers', [])) > 0
 
+        # Synology API uses UUID (uppercase) for deletion
+        rule_uuid = rule.get('UUID', rule.get('uuid', f'rule_{idx}'))
+
         rules_data.append({
-            'ID': rule.get('id'),
+            'Select': False,  # Checkbox column
             'Description': rule.get('description'),
             'Domain': frontend.get('fqdn'),
             'Frontend Port': frontend.get('port'),
             'Backend Host': backend.get('fqdn'),
             'Backend Port': backend.get('port'),
             'HSTS': '✅' if frontend.get('https', {}).get('hsts') else '❌',
-            'WebSocket': '✅' if has_ws else '❌'
+            'WebSocket': '✅' if has_ws else '❌',
+            '_uuid': rule_uuid  # Hidden UUID for deletion
         })
 
     df = pd.DataFrame(rules_data)
@@ -447,20 +463,89 @@ def show_current_rules(manager):
     search = st.text_input("Search rules", "")
     if search:
         df = df[
-            df['Description'].str.contains(search, case=False) |
-            df['Domain'].str.contains(search, case=False)
+            df['Description'].str.contains(search, case=False, na=False) |
+            df['Domain'].str.contains(search, case=False, na=False)
         ]
 
-    st.dataframe(
+    # Selection and delete controls
+    st.divider()
+    col_sel1, col_sel2, col_sel3 = st.columns([2, 2, 2])
+
+    with col_sel1:
+        if st.button("✅ Select All", width="stretch"):
+            st.session_state.selected_rule_ids = df['_uuid'].tolist()
+            st.rerun()
+
+    with col_sel2:
+        if st.button("❌ Deselect All", width="stretch"):
+            st.session_state.selected_rule_ids = []
+            st.rerun()
+
+    with col_sel3:
+        selected_count = len(st.session_state.selected_rule_ids)
+        delete_disabled = selected_count == 0
+
+        if st.button(
+            f"🗑️ Delete Selected ({selected_count})",
+            type="primary" if selected_count > 0 else "secondary",
+            disabled=delete_disabled,
+            width="stretch"
+        ):
+            st.session_state.confirm_delete = True
+
+    # Show confirmation dialog
+    if st.session_state.get('confirm_delete', False):
+        st.warning(f"⚠️ Are you sure you want to delete {selected_count} rule(s)?")
+        col_conf1, col_conf2 = st.columns([1, 1])
+
+        with col_conf1:
+            if st.button("✅ Yes, Delete", type="primary", width="stretch"):
+                with st.spinner(f"Deleting {selected_count} rule(s)..."):
+                    # Debug: Show what we're sending
+                    st.info(f"Debug: Sending UUIDs: {st.session_state.selected_rule_ids}")
+
+                    success, message = manager.delete_rules_bulk(st.session_state.selected_rule_ids)
+
+                    if success:
+                        st.success(f"✅ {message}")
+                        st.session_state.selected_rule_ids = []
+                        st.session_state.confirm_delete = False
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {message}")
+                        st.session_state.confirm_delete = False
+
+        with col_conf2:
+            if st.button("❌ Cancel", width="stretch"):
+                st.session_state.confirm_delete = False
+                st.rerun()
+
+    st.divider()
+
+    # Create interactive dataframe with selection
+    edited_df = st.data_editor(
         df,
-        width="stretch",
         hide_index=True,
+        use_container_width=True,
         column_config={
-            "ID": st.column_config.TextColumn(width="small"),
+            "Select": st.column_config.CheckboxColumn(
+                "Select",
+                help="Select rules to delete",
+                default=False,
+            ),
             "Frontend Port": st.column_config.NumberColumn(format="%d"),
             "Backend Port": st.column_config.NumberColumn(format="%d"),
-        }
+            "_uuid": None,  # Hide the UUID column
+        },
+        disabled=["Description", "Domain", "Frontend Port", "Backend Host", "Backend Port", "HSTS", "WebSocket"],
+        key="rules_table"
     )
+
+    # Update selected rules based on checkbox states
+    selected_rules = edited_df[edited_df['Select'] == True]['_uuid'].tolist()
+    if selected_rules != st.session_state.selected_rule_ids:
+        st.session_state.selected_rule_ids = selected_rules
+        st.rerun()
 
     # Port usage summary
     st.divider()

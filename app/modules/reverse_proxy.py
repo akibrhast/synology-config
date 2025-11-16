@@ -261,6 +261,40 @@ class SynologyReverseProxyManager:
         except Exception as e:
             return False, f"Exception: {str(e)}"
 
+    def delete_rules_bulk(self, rule_uuids):
+        """Delete multiple reverse proxy rules by UUIDs"""
+        if not self.authenticated:
+            return False, "Not authenticated"
+
+        if not rule_uuids:
+            return False, "No rule UUIDs provided"
+
+        try:
+            data = {
+                "api": "SYNO.Core.AppPortal.ReverseProxy",
+                "version": "1",
+                "method": "delete",
+                "uuids": json.dumps(rule_uuids)
+            }
+
+            headers = {"Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"}
+            if self.syno_token:
+                headers["X-SYNO-TOKEN"] = self.syno_token
+
+            response = self.session.post(self.api_url, data=data, headers=headers, verify=False, timeout=10)
+            result = response.json()
+
+            if result.get("success"):
+                self.rules_cache = None  # Invalidate cache
+                count = len(rule_uuids)
+                return True, f"{count} rule{'s' if count > 1 else ''} deleted successfully"
+            else:
+                error_code = result.get('error', {}).get('code')
+                return False, f"Delete failed. Error code: {error_code}"
+
+        except Exception as e:
+            return False, f"Exception: {str(e)}"
+
     def generate_sync_report(self, inventory_services):
         """Compare inventory with actual reverse proxy rules"""
         actual_rules = self.list_rules(refresh=True)
