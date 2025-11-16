@@ -9,6 +9,15 @@ from pathlib import Path
 from dotenv import load_dotenv
 from modules.inventory import InfrastructureInventory
 from modules.reverse_proxy import SynologyReverseProxyManager
+from components.theme import apply_custom_theme
+from components.proxy_components import proxy_rules_table
+from components.ui_components import (
+    section_header,
+    stats_row,
+    action_button,
+    empty_state,
+    metric_card
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,40 +30,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-    }
-    .metric-card {
-        background-color: #f0f2f6;
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 0.5rem 0;
-    }
-    .success-box {
-        padding: 1rem;
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-        margin: 1rem 0;
-    }
-    .warning-box {
-        padding: 1rem;
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
-        margin: 1rem 0;
-    }
-    .error-box {
-        padding: 1rem;
-        background-color: #f8d7da;
-        border-left: 4px solid #dc3545;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Apply custom theme
+apply_custom_theme()
 
 
 # Initialize session state
@@ -256,40 +233,40 @@ def sidebar_config():
 
 def inventory_tab():
     """Inventory management tab"""
-    st.header("📋 Infrastructure Inventory")
+    section_header("Infrastructure Inventory", "View and manage your Docker containers", icon="📋")
 
     inventory = st.session_state.inventory
 
     if inventory is None:
-        st.info("👈 Click 'Scan Portainer' in the sidebar to begin")
+        empty_state(
+            "Click 'Scan Portainer' in the sidebar to begin",
+            icon="📦",
+            action_label=None
+        )
         return
 
     if len(inventory.services) == 0:
-        st.warning("No services found in Portainer.")
+        empty_state(
+            "No services found in Portainer",
+            icon="🔍",
+            action_label=None
+        )
         return
 
-    # Statistics
+    # Statistics using stats_row component
     stats = inventory.get_statistics()
-    col1, col2, col3, col4, col5 = st.columns(5)
+    conflict_count = stats['port_conflicts']
 
-    with col1:
-        st.metric("Total Services", stats['total_services'])
-    with col2:
-        st.metric("Running", stats['running_services'])
-    with col3:
-        st.metric("With Ports", stats['services_with_ports'])
-    with col4:
-        st.metric("Need Proxy", stats['services_needing_proxy'])
-    with col5:
-        conflict_count = stats['port_conflicts']
-        st.metric(
-            "Port Conflicts",
+    stats_row({
+        "Total Services": stats['total_services'],
+        "Running": stats['running_services'],
+        "With Ports": stats['services_with_ports'],
+        "Need Proxy": stats['services_needing_proxy'],
+        "Port Conflicts": (
             conflict_count,
-            delta=None if conflict_count == 0 else "Action needed",
-            delta_color="off" if conflict_count == 0 else "inverse"
+            "Action needed" if conflict_count > 0 else None
         )
-
-    st.divider()
+    })
 
     # Port conflicts section
     conflicts = inventory.check_port_conflicts()
@@ -388,10 +365,14 @@ def inventory_tab():
 
 def proxy_tab():
     """Reverse proxy management tab"""
-    st.header("🌐 Reverse Proxy Manager")
+    section_header("Reverse Proxy Manager", "Manage Synology reverse proxy rules", icon="🌐")
 
     if not st.session_state.authenticated:
-        st.info("👈 Connect to Synology in the sidebar to manage reverse proxy rules")
+        empty_state(
+            "Connect to Synology in the sidebar to manage reverse proxy rules",
+            icon="🔐",
+            action_label=None
+        )
         return
 
     manager = st.session_state.proxy_manager
@@ -407,154 +388,8 @@ def proxy_tab():
 
 
 def show_current_rules(manager):
-    """Display current reverse proxy rules"""
-    # Initialize session state for selected rules
-    if 'selected_rule_ids' not in st.session_state:
-        st.session_state.selected_rule_ids = []
-
-    col1, col2 = st.columns([4, 1])
-
-    with col2:
-        if st.button("🔄 Refresh", width="stretch"):
-            manager.list_rules(refresh=True)
-            st.session_state.selected_rule_ids = []  # Clear selection on refresh
-            st.rerun()
-
-    rules = manager.list_rules(refresh=False)
-
-    if not rules:
-        st.info("No reverse proxy rules found")
-        return
-
-    st.subheader(f"Found {len(rules)} Rules")
-
-    # Debug: Show first rule structure
-    if rules:
-        with st.expander("🔍 Debug: API Response Structure", expanded=False):
-            st.json(rules[0])
-            st.caption("Available keys in first rule:")
-            st.code(str(list(rules[0].keys())))
-
-    # Convert to DataFrame
-    rules_data = []
-    for idx, rule in enumerate(rules):
-        frontend = rule.get('frontend', {})
-        backend = rule.get('backend', {})
-        has_ws = len(rule.get('customize_headers', [])) > 0
-
-        # Synology API uses UUID (uppercase) for deletion
-        rule_uuid = rule.get('UUID', rule.get('uuid', f'rule_{idx}'))
-
-        rules_data.append({
-            'Select': False,  # Checkbox column
-            'Description': rule.get('description'),
-            'Domain': frontend.get('fqdn'),
-            'Frontend Port': frontend.get('port'),
-            'Backend Host': backend.get('fqdn'),
-            'Backend Port': backend.get('port'),
-            'HSTS': '✅' if frontend.get('https', {}).get('hsts') else '❌',
-            'WebSocket': '✅' if has_ws else '❌',
-            '_uuid': rule_uuid  # Hidden UUID for deletion
-        })
-
-    df = pd.DataFrame(rules_data)
-
-    # Search
-    search = st.text_input("Search rules", "")
-    if search:
-        df = df[
-            df['Description'].str.contains(search, case=False, na=False) |
-            df['Domain'].str.contains(search, case=False, na=False)
-        ]
-
-    # Selection and delete controls
-    st.divider()
-    col_sel1, col_sel2, col_sel3 = st.columns([2, 2, 2])
-
-    with col_sel1:
-        if st.button("✅ Select All", width="stretch"):
-            st.session_state.selected_rule_ids = df['_uuid'].tolist()
-            st.rerun()
-
-    with col_sel2:
-        if st.button("❌ Deselect All", width="stretch"):
-            st.session_state.selected_rule_ids = []
-            st.rerun()
-
-    with col_sel3:
-        selected_count = len(st.session_state.selected_rule_ids)
-        delete_disabled = selected_count == 0
-
-        if st.button(
-            f"🗑️ Delete Selected ({selected_count})",
-            type="primary" if selected_count > 0 else "secondary",
-            disabled=delete_disabled,
-            width="stretch"
-        ):
-            st.session_state.confirm_delete = True
-
-    # Show confirmation dialog
-    if st.session_state.get('confirm_delete', False):
-        st.warning(f"⚠️ Are you sure you want to delete {selected_count} rule(s)?")
-        col_conf1, col_conf2 = st.columns([1, 1])
-
-        with col_conf1:
-            if st.button("✅ Yes, Delete", type="primary", width="stretch"):
-                with st.spinner(f"Deleting {selected_count} rule(s)..."):
-                    # Debug: Show what we're sending
-                    st.info(f"Debug: Sending UUIDs: {st.session_state.selected_rule_ids}")
-
-                    success, message = manager.delete_rules_bulk(st.session_state.selected_rule_ids)
-
-                    if success:
-                        st.success(f"✅ {message}")
-                        st.session_state.selected_rule_ids = []
-                        st.session_state.confirm_delete = False
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {message}")
-                        st.session_state.confirm_delete = False
-
-        with col_conf2:
-            if st.button("❌ Cancel", width="stretch"):
-                st.session_state.confirm_delete = False
-                st.rerun()
-
-    st.divider()
-
-    # Create interactive dataframe with selection
-    edited_df = st.data_editor(
-        df,
-        hide_index=True,
-        use_container_width=True,
-        column_config={
-            "Select": st.column_config.CheckboxColumn(
-                "Select",
-                help="Select rules to delete",
-                default=False,
-            ),
-            "Frontend Port": st.column_config.NumberColumn(format="%d"),
-            "Backend Port": st.column_config.NumberColumn(format="%d"),
-            "_uuid": None,  # Hide the UUID column
-        },
-        disabled=["Description", "Domain", "Frontend Port", "Backend Host", "Backend Port", "HSTS", "WebSocket"],
-        key="rules_table"
-    )
-
-    # Update selected rules based on checkbox states
-    selected_rules = edited_df[edited_df['Select'] == True]['_uuid'].tolist()
-    if selected_rules != st.session_state.selected_rule_ids:
-        st.session_state.selected_rule_ids = selected_rules
-        st.rerun()
-
-    # Port usage summary
-    st.divider()
-    used_ports = manager.get_used_ports()
-    st.caption(f"**Ports in use:** {', '.join(map(str, used_ports[:15]))}" +
-               (f" ... ({len(used_ports)} total)" if len(used_ports) > 15 else ""))
-
-    next_port = manager.suggest_next_port()
-    st.caption(f"**Next available port:** {next_port}")
+    """Display current reverse proxy rules using componentized version"""
+    proxy_rules_table(manager)
 
 
 def add_new_rule_form(manager):
@@ -712,22 +547,31 @@ def add_new_rule_form(manager):
 
 def sync_tab():
     """Sync inventory with reverse proxy"""
-    st.header("🔄 Sync Inventory with Proxy")
+    section_header("Sync Inventory with Proxy", "Compare containers with proxy rules", icon="🔄")
 
     if not st.session_state.authenticated:
-        st.info("👈 Connect to Synology in the sidebar")
+        empty_state(
+            "Connect to Synology in the sidebar",
+            icon="🔐",
+            action_label=None
+        )
         return
 
     if st.session_state.inventory is None:
-        st.info("👈 Scan infrastructure first")
+        empty_state(
+            "Scan infrastructure first",
+            icon="📦",
+            action_label=None
+        )
         return
 
     inventory = st.session_state.inventory
     manager = st.session_state.proxy_manager
 
-    col1, col2 = st.columns([4, 1])
-    with col2:
-        if st.button("🔄 Refresh Sync", width="stretch"):
+    # Refresh button aligned to the right
+    _, col_refresh = st.columns([4, 1])
+    with col_refresh:
+        if action_button("Refresh Sync", key="refresh_sync", icon="🔄", type="secondary"):
             manager.list_rules(refresh=True)
             st.rerun()
 
@@ -735,16 +579,12 @@ def sync_tab():
     with st.spinner("Analyzing sync status..."):
         report = manager.generate_sync_report(inventory.services)
 
-    # Summary metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("✅ In Sync", len(report['in_sync']))
-    with col2:
-        st.metric("❌ Missing Proxies", len(report['missing_proxies']))
-    with col3:
-        st.metric("⚠️ Orphaned Proxies", len(report['orphaned_proxies']))
-
-    st.divider()
+    # Summary metrics using stats_row
+    stats_row({
+        "✅ In Sync": len(report['in_sync']),
+        "❌ Missing Proxies": len(report['missing_proxies']),
+        "⚠️ Orphaned Proxies": len(report['orphaned_proxies'])
+    })
 
     # Missing proxies
     if report['missing_proxies']:
