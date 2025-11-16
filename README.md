@@ -26,6 +26,23 @@ Complete Docker infrastructure management with **Portainer API integration** and
 
 ## Quick Start
 
+### Option 1: Docker (Recommended for Production)
+
+```bash
+# 1. Clone and configure
+git clone <repo>
+cd synolog-config
+cp .env.example .env
+# Edit .env with your credentials
+
+# 2. Deploy with Docker Compose
+docker-compose up -d
+
+# 3. Access at http://localhost:8501
+```
+
+### Option 2: Local Development
+
 ```bash
 # 1. Setup
 git clone <repo>
@@ -547,6 +564,106 @@ inventory.generate_proxy_suggestions(domain_suffix="yourdomain.com")
 # Run sync daily at 2am
 0 2 * * * /path/to/.venv/bin/python /path/to/scripts/portainer_sync.py sync > /tmp/sync.log 2>&1
 ```
+
+### Deploying via Portainer
+
+#### Step 1: Push to GitHub
+
+```bash
+cd /path/to/synolog-config
+git init
+git add .
+git commit -m "Initial commit"
+git remote add origin <your-repo-url>
+git push -u origin main
+```
+
+#### Step 2: Deploy in Portainer
+
+1. Navigate to **Stacks** → **Add stack**
+2. **Name**: `synology-manager`
+3. **Build method**: Repository
+4. **Repository URL**: `https://github.com/yourusername/synolog-config`
+5. **Repository reference**: `refs/heads/main`
+6. **Compose path**: `docker-compose.yml`
+7. **Authentication**: Add credentials if private repo
+
+#### Step 3: Add Environment Variables
+
+Click "Advanced mode" and paste:
+
+```env
+PORTAINER_HOST=notmyproblemnas
+PORTAINER_PORT=9000
+PORTAINER_USERNAME=admin
+PORTAINER_PASSWORD=your_portainer_password
+
+SYNOLOGY_HOST=notmyproblemnas
+SYNOLOGY_PORT=5000
+SYNOLOGY_USERNAME=akib_admin
+SYNOLOGY_PASSWORD=your_synology_password
+```
+
+#### Step 4: Deploy
+
+1. Click **Deploy the stack**
+2. Wait for build to complete (first build may take 2-3 minutes)
+3. Container will auto-start and connect to Portainer & Synology
+
+#### Step 5: Access the App
+
+- **Direct access**: `http://<nas-ip>:8501`
+- **After creating reverse proxy**: `https://synology-manager.akibrhast.synology.me`
+
+#### Step 6: Create Reverse Proxy Rule (Optional)
+
+Use the app itself to create its own reverse proxy:
+
+1. Access `http://<nas-ip>:8501`
+2. Go to **Reverse Proxy** tab → **Add New Rule**
+3. Fill in:
+   - Service Name: `synology-manager`
+   - Frontend Domain: `synology-manager.akibrhast.synology.me`
+   - Frontend Port: `443`
+   - Backend Host: `notmyproblemnas`
+   - Backend Port: `8501`
+   - Enable HSTS: ✅
+   - **Enable WebSocket: ✅** (required for Streamlit)
+4. Click **Create Rule**
+5. Access via: `https://synology-manager.akibrhast.synology.me`
+
+#### Updating the Deployment
+
+1. Push changes to GitHub
+2. In Portainer stack, click **Pull and redeploy**
+3. Done!
+
+#### Troubleshooting Deployment
+
+**Container won't start:**
+```bash
+# Check logs in Portainer or via CLI
+docker logs synology-infrastructure-manager
+
+# Common issues:
+# - Missing environment variables
+# - Port 8501 already in use
+# - Network conflicts
+```
+
+**Can't connect to Portainer/Synology:**
+- Verify environment variables are correct
+- Check container can reach services:
+  ```bash
+  docker exec synology-infrastructure-manager ping notmyproblemnas
+  ```
+
+**Streamlit shows "Unhealthy":**
+- Wait 40 seconds for startup (healthcheck grace period)
+- Verify Streamlit is running:
+  ```bash
+  docker exec synology-infrastructure-manager curl -f http://localhost:8501/_stcore/health
+  ```
 
 ---
 

@@ -105,9 +105,26 @@ class SynologyReverseProxyManager:
         return any(rule.get("description") == description for rule in rules)
 
     def domain_exists(self, domain):
-        """Check if frontend domain already exists"""
+        """Check if frontend domain already exists (deprecated - use domain_port_exists instead)"""
         rules = self.list_rules()
         return any(rule.get("frontend", {}).get("fqdn") == domain for rule in rules)
+
+    def domain_port_exists(self, domain, port):
+        """Check if frontend domain:port combination already exists"""
+        rules = self.list_rules()
+        for rule in rules:
+            frontend = rule.get("frontend", {})
+            # Convert both to int for comparison to handle type mismatches
+            existing_port = frontend.get("port")
+            if existing_port is not None:
+                try:
+                    if frontend.get("fqdn") == domain and int(existing_port) == int(port):
+                        return True
+                except (ValueError, TypeError):
+                    # If conversion fails, do string comparison
+                    if frontend.get("fqdn") == domain and str(existing_port) == str(port):
+                        return True
+        return False
 
     def get_port_conflicts(self, backend_port):
         """Get rules using the same backend port"""
@@ -147,7 +164,7 @@ class SynologyReverseProxyManager:
         return None
 
     def add_rule(self, description, frontend_domain, backend_host, backend_port,
-                 hsts=True, websocket=False):
+                 frontend_port=443, hsts=True, websocket=False):
         """Add a new reverse proxy rule"""
         if not self.authenticated:
             return False, "Not authenticated"
@@ -163,7 +180,7 @@ class SynologyReverseProxyManager:
             "frontend": {
                 "acl": None,
                 "fqdn": frontend_domain,
-                "port": 443,
+                "port": frontend_port,
                 "protocol": 1,
                 "https": {"hsts": hsts}
             },

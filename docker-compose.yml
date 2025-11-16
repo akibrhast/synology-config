@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  synology-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: synology-infrastructure-manager:latest
+    container_name: synology-infrastructure-manager
+    ports:
+      - "8501:8501"
+    environment:
+      # Portainer Connection
+      - PORTAINER_HOST=${PORTAINER_HOST:-notmyproblemnas}
+      - PORTAINER_PORT=${PORTAINER_PORT:-9000}
+      - PORTAINER_USERNAME=${PORTAINER_USERNAME:-admin}
+      - PORTAINER_PASSWORD=${PORTAINER_PASSWORD}
+
+      # Synology Connection
+      - SYNOLOGY_HOST=${SYNOLOGY_HOST:-notmyproblemnas}
+      - SYNOLOGY_PORT=${SYNOLOGY_PORT:-5000}
+      - SYNOLOGY_USERNAME=${SYNOLOGY_USERNAME:-akib_admin}
+      - SYNOLOGY_PASSWORD=${SYNOLOGY_PASSWORD}
+    restart: unless-stopped
+    networks:
+      - synology-net
+    labels:
+      - "com.docker.compose.project=synology-manager"
+
+networks:
+  synology-net:
+    driver: bridge

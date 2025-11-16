@@ -6,8 +6,12 @@ import streamlit as st
 import pandas as pd
 import os
 from pathlib import Path
+from dotenv import load_dotenv
 from modules.inventory import InfrastructureInventory
 from modules.reverse_proxy import SynologyReverseProxyManager
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Page configuration
 st.set_page_config(
@@ -70,6 +74,27 @@ def sidebar_config():
     """Sidebar configuration and authentication"""
     st.sidebar.title("⚙️ Configuration")
 
+    # Auto-connect to Portainer if credentials are available
+    if not st.session_state.portainer_connected and 'portainer_auto_connect_attempted' not in st.session_state:
+        portainer_password = os.getenv("PORTAINER_PASSWORD", "")
+        if portainer_password:
+            st.session_state.portainer_auto_connect_attempted = True
+            with st.spinner("Auto-connecting to Portainer..."):
+                try:
+                    inventory = InfrastructureInventory(
+                        os.getenv("PORTAINER_HOST", "notmyproblemnas"),
+                        os.getenv("PORTAINER_PORT", "9000"),
+                        os.getenv("PORTAINER_USERNAME", "admin"),
+                        portainer_password
+                    )
+                    if inventory.is_authenticated():
+                        inventory.scan_stacks()
+                        st.session_state.inventory = inventory
+                        st.session_state.portainer_connected = True
+                        st.rerun()
+                except Exception:
+                    pass  # Silently fail auto-connect, user can manually connect
+
     # Portainer connection
     st.sidebar.subheader("Portainer Connection")
 
@@ -79,7 +104,7 @@ def sidebar_config():
         portainer_username = st.text_input("Portainer Username", value=os.getenv("PORTAINER_USERNAME", "admin"))
         portainer_password = st.text_input("Portainer Password", type="password", value=os.getenv("PORTAINER_PASSWORD", ""))
 
-        if st.button("🔍 Scan Portainer", use_container_width=True):
+        if st.button("🔍 Scan Portainer", width="stretch"):
             if not portainer_password:
                 st.error("Portainer password required")
             else:
@@ -105,7 +130,7 @@ def sidebar_config():
 
     if st.session_state.portainer_connected:
         st.sidebar.success("✅ Connected to Portainer")
-        if st.sidebar.button("🔄 Refresh Inventory", use_container_width=True):
+        if st.sidebar.button("🔄 Refresh Inventory", width="stretch"):
             if st.session_state.inventory:
                 with st.spinner("Refreshing..."):
                     st.session_state.inventory.scan_stacks()
@@ -113,6 +138,26 @@ def sidebar_config():
                     st.rerun()
 
     st.sidebar.divider()
+
+    # Auto-connect to Synology if credentials are available
+    if not st.session_state.authenticated and 'synology_auto_connect_attempted' not in st.session_state:
+        synology_password = os.getenv("SYNOLOGY_PASSWORD", "")
+        if synology_password:
+            st.session_state.synology_auto_connect_attempted = True
+            with st.spinner("Auto-connecting to Synology..."):
+                try:
+                    manager = SynologyReverseProxyManager(
+                        os.getenv("SYNOLOGY_HOST", "notmyproblemnas"),
+                        os.getenv("SYNOLOGY_PORT", "5000"),
+                        os.getenv("SYNOLOGY_USERNAME", "akib_admin"),
+                        synology_password
+                    )
+                    if manager.authenticated:
+                        st.session_state.proxy_manager = manager
+                        st.session_state.authenticated = True
+                        st.rerun()
+                except Exception:
+                    pass  # Silently fail auto-connect, user can manually connect
 
     # Synology connection
     st.sidebar.subheader("Synology Connection")
@@ -123,7 +168,7 @@ def sidebar_config():
         username = st.text_input("Username", value=os.getenv("SYNOLOGY_USERNAME", "akib_admin"))
         password = st.text_input("Password", type="password", value=os.getenv("SYNOLOGY_PASSWORD", ""))
 
-        if st.button("🔐 Connect", use_container_width=True):
+        if st.button("🔐 Connect", width="stretch"):
             if not password:
                 st.error("Password required")
             else:
@@ -142,7 +187,7 @@ def sidebar_config():
 
     if st.session_state.authenticated:
         st.sidebar.success("✅ Connected to Synology")
-        if st.sidebar.button("🔓 Disconnect", use_container_width=True):
+        if st.sidebar.button("🔓 Disconnect", width="stretch"):
             st.session_state.proxy_manager = None
             st.session_state.authenticated = False
             st.rerun()
@@ -262,7 +307,7 @@ def inventory_tab():
     # Display table
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True
     )
 
@@ -276,7 +321,7 @@ def inventory_tab():
             data=csv,
             file_name="infrastructure_inventory.csv",
             mime="text/csv",
-            use_container_width=True
+            width="stretch"
         )
 
 
@@ -305,7 +350,7 @@ def show_current_rules(manager):
     col1, col2 = st.columns([4, 1])
 
     with col2:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button("🔄 Refresh", width="stretch"):
             manager.list_rules(refresh=True)
             st.rerun()
 
@@ -347,7 +392,7 @@ def show_current_rules(manager):
 
     st.dataframe(
         df,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
         column_config={
             "ID": st.column_config.TextColumn(width="small"),
@@ -370,81 +415,153 @@ def add_new_rule_form(manager):
     """Form to add new reverse proxy rule"""
     st.subheader("Create New Proxy Rule")
 
-    with st.form("add_rule_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
+    # Ensure we have fresh rules for validation
+    if 'last_rules_refresh' not in st.session_state or st.session_state.last_rules_refresh is None:
+        manager.list_rules(refresh=True)
+        st.session_state.last_rules_refresh = True
 
-        with col1:
-            description = st.text_input(
-                "Service Name *",
-                placeholder="e.g., bazarr",
-                help="Unique identifier for this rule"
-            )
+    # Use columns for side-by-side layout
+    col1, col2 = st.columns(2)
 
-            frontend_domain = st.text_input(
-                "Frontend Domain *",
-                placeholder="e.g., bazarr.akibrhast.synology.me",
-                help="Full domain name for HTTPS access"
-            )
+    with col1:
+        description = st.text_input(
+            "Service Name *",
+            placeholder="e.g., bazarr",
+            help="Unique identifier for this rule",
+            key="new_rule_description"
+        )
 
-            backend_host = st.text_input(
-                "Backend Host *",
-                value="notmyproblemnas",
-                help="Hostname or IP of the backend service"
-            )
+        frontend_domain = st.text_input(
+            "Frontend Domain *",
+            placeholder="e.g., bazarr.akibrhast.synology.me",
+            help="Full domain name for HTTPS access",
+            key="new_rule_domain"
+        )
 
-        with col2:
-            suggested_port = manager.suggest_next_port()
-            backend_port = st.number_input(
-                "Backend Port *",
-                min_value=1,
-                max_value=65535,
-                value=suggested_port,
-                help="Port where the service is running"
-            )
+        backend_host = st.text_input(
+            "Backend Host *",
+            value="notmyproblemnas",
+            help="Hostname or IP of the backend service",
+            key="new_rule_host"
+        )
 
-            hsts = st.checkbox("Enable HSTS", value=True, help="HTTP Strict Transport Security")
-            websocket = st.checkbox("Enable WebSocket", value=False, help="For services requiring WebSocket support")
+    with col2:
+        frontend_port = st.number_input(
+            "Frontend Port (Source) *",
+            min_value=1,
+            max_value=65535,
+            value=443,
+            help="HTTPS port that users connect to (usually 443)",
+            key="new_rule_frontend_port"
+        )
 
-        # Validation warnings
-        if description and manager.description_exists(description):
-            st.warning(f"⚠️ Description '{description}' already exists")
+        suggested_port = manager.suggest_next_port()
+        backend_port = st.number_input(
+            "Backend Port (Destination) *",
+            min_value=1,
+            max_value=65535,
+            value=suggested_port,
+            help="Port where the service is running",
+            key="new_rule_backend_port"
+        )
 
-        if frontend_domain and manager.domain_exists(frontend_domain):
-            st.error(f"❌ Domain '{frontend_domain}' already exists")
+        hsts = st.checkbox("Enable HSTS", value=True, help="HTTP Strict Transport Security", key="new_rule_hsts")
+        websocket = st.checkbox("Enable WebSocket", value=False, help="For services requiring WebSocket support", key="new_rule_ws")
 
-        if backend_port:
-            conflicts = manager.get_port_conflicts(backend_port)
-            if conflicts:
-                st.warning(f"⚠️ Port {backend_port} is already used by:")
-                for conflict in conflicts:
-                    st.caption(f"  • {conflict['description']} ({conflict['domain']})")
+    # Real-time validation (shows as user types)
+    has_errors = False
+    is_valid = True
 
-        submitted = st.form_submit_button("✅ Create Rule", use_container_width=True)
+    # Check required fields
+    if not description or not frontend_domain or not backend_host:
+        is_valid = False
 
-        if submitted:
-            if not description or not frontend_domain or not backend_host:
-                st.error("Please fill in all required fields")
-            elif manager.description_exists(description):
-                st.error(f"Description '{description}' already exists")
-            elif manager.domain_exists(frontend_domain):
-                st.error(f"Domain '{frontend_domain}' already exists")
-            else:
-                with st.spinner("Creating rule..."):
-                    success, message = manager.add_rule(
-                        description=description,
-                        frontend_domain=frontend_domain,
-                        backend_host=backend_host,
-                        backend_port=backend_port,
-                        hsts=hsts,
-                        websocket=websocket
-                    )
+    # Check domain:port conflict (BLOCKER - same domain CAN be used with different ports)
+    if frontend_domain and frontend_port:
+        # Get all rules and check for conflicts
+        rules = manager.list_rules()
 
-                    if success:
-                        st.success(f"✅ {message}")
-                        st.balloons()
-                        st.rerun()
-                    else:
-                        st.error(f"❌ {message}")
+        # Debug: Show total rules loaded
+        st.caption(f"🔍 Debug: Total rules loaded: {len(rules)}")
+
+        matching_domain_rules = [r for r in rules if r.get("frontend", {}).get("fqdn") == frontend_domain]
+
+        # Debug output - always show for debugging
+        if matching_domain_rules:
+            st.warning(f"🔍 Debug: Found {len(matching_domain_rules)} existing rules for domain '{frontend_domain}'")
+            for rule in matching_domain_rules:
+                existing_port = rule.get("frontend", {}).get("port")
+                st.caption(f"  - Existing: {rule.get('description')} on port {existing_port} (type: {type(existing_port).__name__})")
+            st.caption(f"  - Checking: port {frontend_port} (type: {type(frontend_port).__name__})")
+        else:
+            st.caption(f"🔍 Debug: No existing rules found for domain '{frontend_domain}'")
+
+        # Check if exact domain:port exists
+        conflict_exists = manager.domain_port_exists(frontend_domain, frontend_port)
+        st.caption(f"🔍 Debug: domain_port_exists() returned: {conflict_exists}")
+
+        if conflict_exists:
+            st.error(f"❌ Domain '{frontend_domain}:{frontend_port}' already exists")
+            has_errors = True
+            is_valid = False
+        elif matching_domain_rules:
+            # Same domain exists on different port - show info with details
+            existing_ports = [r.get("frontend", {}).get("port") for r in matching_domain_rules]
+            st.info(f"ℹ️ Domain '{frontend_domain}' is already used on port(s): {', '.join(map(str, existing_ports))}")
+
+    # Check description conflict (WARNING only - descriptions can be similar)
+    if description and manager.description_exists(description):
+        st.warning(f"⚠️ Description '{description}' already exists")
+
+    # Check backend port conflict (INFO only - same port can be used for different domains)
+    if backend_port:
+        conflicts = manager.get_port_conflicts(backend_port)
+        if conflicts:
+            st.info(f"ℹ️ Backend port {backend_port} is already used by:")
+            for conflict in conflicts:
+                st.caption(f"  • {conflict['description']} ({conflict['domain']})")
+
+    st.divider()
+
+    # Create button - disabled until all fields valid and no errors
+    col_btn1, col_btn2, col_btn3 = st.columns([2, 1, 2])
+    with col_btn2:
+        create_clicked = st.button(
+            "✅ Create Rule",
+            width="stretch",
+            disabled=not is_valid,
+            type="primary"
+        )
+
+    if create_clicked:
+        # Validate required fields
+        if not description or not frontend_domain or not backend_host:
+            st.error("❌ Please fill in all required fields")
+        elif manager.domain_port_exists(frontend_domain, frontend_port):
+            st.error(f"❌ Domain '{frontend_domain}:{frontend_port}' already exists")
+        else:
+            with st.spinner("Creating rule..."):
+                success, message = manager.add_rule(
+                    description=description,
+                    frontend_domain=frontend_domain,
+                    backend_host=backend_host,
+                    backend_port=backend_port,
+                    frontend_port=frontend_port,
+                    hsts=hsts,
+                    websocket=websocket
+                )
+
+                if success:
+                    st.success(f"✅ {message}")
+                    st.balloons()
+                    # Clear the form by resetting session state
+                    for key in ['new_rule_description', 'new_rule_domain', 'new_rule_host',
+                                'new_rule_frontend_port', 'new_rule_backend_port', 'new_rule_hsts', 'new_rule_ws']:
+                        if key in st.session_state:
+                            del st.session_state[key]
+                    st.rerun()
+                else:
+                    st.error(f"❌ {message}")
 
 
 def sync_tab():
@@ -464,7 +581,7 @@ def sync_tab():
 
     col1, col2 = st.columns([4, 1])
     with col2:
-        if st.button("🔄 Refresh Sync", use_container_width=True):
+        if st.button("🔄 Refresh Sync", width="stretch"):
             manager.list_rules(refresh=True)
             st.rerun()
 
@@ -498,7 +615,7 @@ def sync_tab():
             })
 
         df_missing = pd.DataFrame(missing_data)
-        st.dataframe(df_missing, use_container_width=True, hide_index=True)
+        st.dataframe(df_missing, width="stretch", hide_index=True)
 
         # Auto-create option
         if st.button("🚀 Auto-Create Missing Proxies", type="primary"):
@@ -554,7 +671,7 @@ def sync_tab():
             })
 
         df_orphaned = pd.DataFrame(orphaned_data)
-        st.dataframe(df_orphaned, use_container_width=True, hide_index=True)
+        st.dataframe(df_orphaned, width="stretch", hide_index=True)
 
         st.caption("💡 These may be legacy rules or external services not managed by docker-compose")
 
@@ -572,7 +689,7 @@ def sync_tab():
             })
 
         df_sync = pd.DataFrame(sync_data)
-        st.dataframe(df_sync, use_container_width=True, hide_index=True)
+        st.dataframe(df_sync, width="stretch", hide_index=True)
 
 
 def main():
